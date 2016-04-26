@@ -155,6 +155,15 @@ int git_submodule_lookup(
 
 	assert(repo && name);
 
+    if (0 != repo->submodule_cache) {
+        khiter_t pos = git_strmap_lookup_index(repo->submodule_cache, name);
+        if (git_strmap_valid_index(repo->submodule_cache, pos)) {
+            *out = git_strmap_value_at(repo->submodule_cache, pos);
+            GIT_REFCOUNT_INC(*out);
+            return 0;
+        }
+    }
+
 	if ((error = submodule_alloc(&sm, repo, name)) < 0)
 		return error;
 
@@ -1457,13 +1466,23 @@ int git_submodule__status(
 		return 0;
 	}
 
-	/* refresh the index OID */
-	if (submodule_update_index(sm) < 0)
-		return -1;
+    /* If the user has requested caching submodule state, performing these
+     * expensive operations (especially `submodule_update_head`, which is
+     * bottlenecked on `git_repository_head_tree`) eliminates much of the
+     * advantage.  We will, therefore, interpret the rquest for caching to
+     * apply here to and skip them.
+     */
 
-	/* refresh the HEAD OID */
-	if (submodule_update_head(sm) < 0)
-		return -1;
+    if (0 == sm->repo->submodule_cache) {
+
+        /* refresh the index OID */
+        if (submodule_update_index(sm) < 0)
+            return -1;
+
+        /* refresh the HEAD OID */
+        if (submodule_update_head(sm) < 0)
+            return -1;
+    }
 
 	/* for ignore == dirty, don't scan the working directory */
 	if (ign == GIT_SUBMODULE_IGNORE_DIRTY) {
@@ -1521,6 +1540,33 @@ int git_submodule_location(unsigned int *location, git_submodule *sm)
 		location, NULL, NULL, NULL, sm, GIT_SUBMODULE_IGNORE_ALL);
 }
 
+int git_submodule_cache_all(git_repository *repo)
+{
+       int error;
+
+       assert(repo);
+
+       if ((error = git_strmap_alloc(&repo->submodule_cache)))
+               return error;
+
+       error = all_submodules(repo, repo->submodule_cache);
+       return error;
+}
+
+int git_submodule_clear_cache(git_repository *repo)
+{
+       git_submodule *sm;
+       assert(repo);
+       if (0 == repo->submodule_cache) {
+               return 0;
+       }
+       git_strmap_foreach_value(repo->submodule_cache, sm, {
+               git_submodule_free(sm);
+       });
+       git_strmap_free(repo->submodule_cache);
+       repo->submodule_cache = 0;
+       return 0;
+}
 
 /*
  * INTERNAL FUNCTIONS

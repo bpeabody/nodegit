@@ -109,6 +109,7 @@ void git_repository__cleanup(git_repository *repo)
 {
 	assert(repo);
 
+    git_submodule_clear_cache(repo);
 	git_cache_clear(&repo->objects);
 	git_attr_cache_flush(repo);
 
@@ -176,6 +177,7 @@ static git_repository *repository_alloc(void)
 		git_cache_init(&repo->objects) < 0)
 		goto on_error;
 
+    repo->submodule_cache = 0;
 	git_array_init_to_size(repo->reserved_names, 4);
 	if (!repo->reserved_names.ptr)
 		goto on_error;
